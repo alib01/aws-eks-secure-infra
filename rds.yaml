@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'MySQL RDS Instance (db.m5.xlarge) with Multi-AZ deployment'
+
+Parameters:
+  DBName:
+    Description: 'The database name'
+    Type: String
+    Default: 'mydatabase'
+    MinLength: '1'
+    MaxLength: '64'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+  
+  DBUsername:
+    Description: 'Username for MySQL database access'
+    Type: String
+    Default: 'admin'
+    MinLength: '1'
+    MaxLength: '16'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    NoEcho: true
+  
+  DBPassword:
+    Description: 'Password for MySQL database access'
+    Type: String
+    Default: 'ChangeMe123!'
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '(?=^.{8,41}$)(?=.*[0-9])(?=.*[A-Z])(?=.*[a-z])(?=.*[^A-Za-z0-9]).*'
+    NoEcho: true
+  
+  DBAllocatedStorage:
+    Description: 'The size of the database (GiB)'
+    Type: Number
+    Default: 100
+    MinValue: 20
+    MaxValue: 65536
+  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: 'VPC ID where the RDS will be deployed'
+  
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: 'First private subnet for RDS'
+  
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: 'Second private subnet for RDS (for Multi-AZ)'
+
+Resources:
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: 'Subnet group for MySQL RDS'
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: 'MySQL-RDS-Subnet-Group'
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group for MySQL RDS'
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !GetAtt DBSecurityGroup.GroupId  # Only allow self-referencing traffic (adjust as needed)
+
+  MySQLRDS:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: !Ref DBAllocatedStorage
+      DBInstanceClass: db.m5.xlarge
+      DBName: !Ref DBName
+      Engine: mysql
+      EngineVersion: '8.0.34'  # Specify your preferred version
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      MultiAZ: true  # Enable for production
+      StorageType: gp3
+      StorageEncrypted: true
+      BackupRetentionPeriod: 7  # Days
+      PreferredBackupWindow: '03:00-04:00'  # UTC
+      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'  # UTC
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !GetAtt DBSecurityGroup.GroupId
+      PubliclyAccessible: false
+      DeletionProtection: true  # Prevent accidental deletion
+      MonitoringInterval: 60  # Enhanced monitoring interval in seconds
+      EnablePerformanceInsights: true
+      PerformanceInsightsRetentionPeriod: 7  # Days
+      Tags:
+        - Key: Environment
+          Value: Production
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  DBEndpoint:
+    Description: 'MySQL RDS Endpoint'
+    Value: !GetAtt MySQLRDS.Endpoint.Address
+  DBPort:
+    Description: 'MySQL Port'
+    Value: !GetAtt MySQLRDS.Endpoint.Port
+  DBSecurityGroupId:
+    Description: 'Security Group ID for MySQL access'
+    Value: !Ref DBSecurityGroup
